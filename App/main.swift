@@ -1,11 +1,19 @@
 import AppKit
 import ServiceManagement
 
+/// Insets that line custom menu views up with standard items on macOS 26:
+/// text starts after the checkmark column, and trailing content ends where "⌘Q" does.
+enum MenuMetrics {
+    static let leading: CGFloat = 30
+    static let trailing: CGFloat = 16
+}
+
 final class SparklineView: NSView {
     var samples: [Double] = [] { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
-        let inset = bounds.insetBy(dx: 14, dy: 6)
+        let inset = NSRect(x: MenuMetrics.leading, y: 6,
+                           width: bounds.width - MenuMetrics.leading - MenuMetrics.trailing, height: bounds.height - 12)
         NSColor.quaternaryLabelColor.setFill()
         NSBezierPath(roundedRect: inset, xRadius: 4, yRadius: 4).fill()
         guard samples.count > 1, let lo = samples.min(), let hi = samples.max() else { return }
@@ -27,21 +35,37 @@ final class SparklineView: NSView {
 /// view sidesteps that and stays full-contrast in light and dark mode.
 final class ReadoutView: NSView {
     private let label = NSTextField(labelWithString: "")
+    private let valueLabel = NSTextField(labelWithString: "")
     var text: String {
         get { label.stringValue }
         set { label.stringValue = newValue }
     }
+    /// Optional right-aligned value, e.g. "38%".
+    var value: String {
+        get { valueLabel.stringValue }
+        set { valueLabel.stringValue = newValue }
+    }
 
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 22))
+        super.init(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        autoresizingMask = [.width]   // stretch to the menu's width
         label.font = .menuFont(ofSize: 0)
         label.textColor = .labelColor
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+        valueLabel.textColor = .labelColor
+        valueLabel.alignment = .right
+        for v in [label, valueLabel] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+        }
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -14),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: MenuMetrics.leading),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            valueLabel.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
+            valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -MenuMetrics.trailing),
+            valueLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
 
@@ -52,10 +76,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let historyLength = 120          // 2 minutes at 1s
     private let sensors = TempSensors()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let sparkline = SparklineView(frame: NSRect(x: 0, y: 0, width: 240, height: 60))
+    private let sparkline: SparklineView = {
+        let v = SparklineView(frame: NSRect(x: 0, y: 0, width: 200, height: 60))
+        v.autoresizingMask = [.width]   // stretch to the menu's width
+        return v
+    }()
     private let maxRow = ReadoutView()
     private let avgRow = ReadoutView()
     private let peakRow = ReadoutView()
+    private let topRows = (0..<3).map { _ in ReadoutView() }
+    private var menuOpen = false
+    private var topTicks = 0
     private let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
     private var history: [Double] = []
     private var log: [Sample] = []
@@ -84,6 +115,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "Top CPU (% of one core)"))
+        for row in topRows {
+            let item = NSMenuItem()
+            item.view = row
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
         styleHardResetItem(highlighted: false)
         menu.addItem(hardResetItem)
         menu.addItem(.separator())
@@ -94,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         refreshLoginState()
         tick()
+        if CommandLine.arguments.contains("--show-menu") { showMenuForScreenshot() }
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer, forMode: .common)   // keep updating while the menu is open
     }
@@ -115,10 +154,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                        attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)]))
         statusItem.button?.attributedTitle = text
 
-        maxRow.text = String(format: "Hottest core:  %.1f °C", reading.max)
-        avgRow.text = String(format: "Average (%d sensors):  %.1f °C", reading.sensorCount, reading.average)
-        peakRow.text = String(format: "Peak this session:  %.1f °C", sessionPeak)
+        maxRow.text = "Hottest core"
+        maxRow.value = String(format: "%.1f °C", reading.max)
+        avgRow.text = "Average (\(reading.sensorCount) sensors)"
+        avgRow.value = String(format: "%.1f °C", reading.average)
+        peakRow.text = "Peak this session"
+        peakRow.value = String(format: "%.1f °C", sessionPeak)
         sparkline.samples = history
+        if menuOpen {
+            topTicks += 1
+            if topTicks % 2 == 0 { refreshTopCPU() }
+        }
     }
 
     /// systemRed is too light to read as text on the light menu background.
@@ -144,7 +190,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         styleHardResetItem(highlighted: item === hardResetItem)
     }
 
+    /// `open -a CPUTemp --args --show-menu`: opens the menu for 12 s, for screenshots while developing.
+    private func showMenuForScreenshot() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, let menu = self.statusItem.menu else { return }
+            let close = Timer(timeInterval: 12, repeats: false) { _ in menu.cancelTracking() }
+            RunLoop.main.add(close, forMode: .common)
+            self.statusItem.button?.performClick(nil)
+        }
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        menuOpen = true
+        topTicks = 0
+        refreshTopCPU()
+    }
+
+    /// Only sampled while the menu is open (every 2 s), so it costs nothing otherwise.
+    private func refreshTopCPU() {
+        DispatchQueue.global(qos: .utility).async {
+            let top = TopCPU.sample(limit: self.topRows.count)
+            // .common so the update lands while the menu is open and tracking events.
+            RunLoop.main.perform(inModes: [.common]) {
+                for (i, row) in self.topRows.enumerated() {
+                    let e = i < top.count ? top[i] : nil
+                    row.text = e.map { $0.processes > 1 ? "\($0.name) (\($0.processes))" : $0.name } ?? ""
+                    row.value = e.map { String(format: "%.0f%%", $0.cpu) } ?? ""
+                    row.needsLayout = true
+                    row.layoutSubtreeIfNeeded()
+                }
+            }
+        }
+    }
+
     func menuDidClose(_ menu: NSMenu) {
+        menuOpen = false
         styleHardResetItem(highlighted: false)
     }
 

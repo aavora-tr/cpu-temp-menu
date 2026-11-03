@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 TARGET=arm64-apple-macos14.0
 APP=build/CPUTemp.app
 rm -rf build && mkdir -p "$APP/Contents/MacOS"
-swiftc -O -target $TARGET -o "$APP/Contents/MacOS/CPUTemp" TempSensors.swift History.swift HardReset.swift App/main.swift
+swiftc -O -target $TARGET -o "$APP/Contents/MacOS/CPUTemp" TempSensors.swift History.swift HardReset.swift TopCPU.swift App/main.swift
 swiftc -O -target $TARGET -o build/cputemp TempSensors.swift History.swift CLI/main.swift
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

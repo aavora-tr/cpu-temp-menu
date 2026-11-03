@@ -70,7 +70,7 @@ enum HardReset {
     }
 
     /// App name for anything inside a .app bundle (so Electron helpers group under their app), else the binary name.
-    private static func displayName(_ path: String) -> String {
+    static func displayName(_ path: String) -> String {
         if let r = path.range(of: ".app/") {   // outermost bundle
             return (String(path[..<r.lowerBound]) as NSString).lastPathComponent
         }

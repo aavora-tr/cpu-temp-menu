@@ -4,6 +4,7 @@ A macOS menu bar app and CLI for Apple Silicon. It shows live CPU temperature wi
 
 - **Menu bar:** the hottest die temperature, with a coloured dot (green under 60 °C, orange under 80 °C, red above).
 - **Menu:** a 2-minute sparkline, the hottest core, the average across all sensors, the peak this session, and a launch-at-login toggle.
+- **Top CPU:** the three apps or processes using the most CPU right now. Each app's helper processes are added together, so Chrome's renderers count as one "Google Chrome" line. It refreshes every 2 seconds while the menu is open and costs nothing when it's closed.
 - **`cputemp` CLI:** a thermal snapshot with temperatures, macOS thermal state, a 10-minute trend, load average, power source and the top CPU processes. Add `--json` for machine-readable output.
 - **Claude Code hook:** `cputemp --hook` adds the snapshot to your prompt whenever you ask about heat, fans, throttling or a slow machine.
 - **Kill All Background Processes:** a danger button for when agents, dev servers or Electron apps are cooking your Mac. See [Hard reset](#hard-reset).
@@ -143,9 +144,14 @@ Turn off **Launch at Login** before you delete the app. If you added the Claude 
 | `TempSensors.swift` | Reads die temperatures through the private IOHIDEventSystem API |
 | `History.swift` | 10-minute sample log shared between the app and the CLI |
 | `HardReset.swift` | Picks and kills the hard-reset targets |
+| `TopCPU.swift` | Finds the top CPU users, grouped by app, for the menu |
 | `App/main.swift` | Menu bar app (AppKit) |
 | `CLI/main.swift` | `cputemp` CLI and Claude Code hook |
 | `build.sh` | Builds, signs and installs both |
+
+## Development
+
+`open -a CPUTemp --args --show-menu` opens the menu for 12 seconds, so you can screenshot it without clicking.
 
 ## Caveats
 
