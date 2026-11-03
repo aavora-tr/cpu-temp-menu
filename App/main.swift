@@ -48,7 +48,7 @@ final class ReadoutView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let historyLength = 120          // 2 minutes at 1s
     private let sensors = TempSensors()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
     private var history: [Double] = []
     private var log: [Sample] = []
+    private lazy var hardResetItem = makeHardResetItem()
     private static let logLength = 600     // 10 minutes, shared with the cputemp CLI
     private var sessionPeak = 0.0
 
@@ -72,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let menu = NSMenu()
+        menu.delegate = self
         menu.addItem(.sectionHeader(title: "CPU Temperature"))
         let chartItem = NSMenuItem()
         chartItem.view = sparkline
@@ -82,7 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        menu.addItem(makeHardResetItem())
+        styleHardResetItem(highlighted: false)
+        menu.addItem(hardResetItem)
         menu.addItem(.separator())
         loginItem.target = self
         menu.addItem(loginItem)
@@ -118,16 +121,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sparkline.samples = history
     }
 
+    /// systemRed is too light to read as text on the light menu background.
+    /// This is a deep red in light mode (about 6:1 contrast) and a soft red in dark mode.
+    private static let dangerRed = NSColor(name: "dangerRed") { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(srgbRed: 1.0, green: 0.42, blue: 0.40, alpha: 1)    // #FF6B66
+            : NSColor(srgbRed: 0.70, green: 0.08, blue: 0.08, alpha: 1)   // #B31414
+    }
+
+    /// Red normally; white while highlighted, because red on the blue selection is unreadable.
+    private func styleHardResetItem(highlighted: Bool) {
+        let color = highlighted ? NSColor.white : Self.dangerRed
+        hardResetItem.attributedTitle = NSAttributedString(string: "Kill All Background Processes…", attributes: [
+            .foregroundColor: color,
+            .font: NSFont.menuFont(ofSize: 0).withWeight(.semibold),
+        ])
+        hardResetItem.image = NSImage(systemSymbolName: "exclamationmark.octagon.fill", accessibilityDescription: "Danger")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [color]))
+    }
+
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+        styleHardResetItem(highlighted: item === hardResetItem)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        styleHardResetItem(highlighted: false)
+    }
+
     private func makeHardResetItem() -> NSMenuItem {
         let item = NSMenuItem(title: "", action: #selector(confirmHardReset), keyEquivalent: "")
         item.target = self
-        item.attributedTitle = NSAttributedString(string: "Kill All Background Processes…", attributes: [
-            .foregroundColor: NSColor.systemRed,
-            .font: NSFont.menuFont(ofSize: 0),
-        ])
-        let config = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
-        item.image = NSImage(systemSymbolName: "exclamationmark.octagon.fill", accessibilityDescription: "Danger")?
-            .withSymbolConfiguration(config)
         item.toolTip = """
             DANGER: hard reset without restarting.
             Force-quits every process you own: all open apps (unsaved work is lost), \
@@ -190,3 +213,9 @@ let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()
+
+extension NSFont {
+    func withWeight(_ weight: NSFont.Weight) -> NSFont {
+        NSFont.systemFont(ofSize: pointSize, weight: weight)
+    }
+}
