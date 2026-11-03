@@ -5,6 +5,10 @@ import Foundation
 enum TopCPU {
     struct Entry { let name: String; let cpu: Double; let processes: Int }
 
+    /// Left out of the list: MenuBarAgent renders the open menu, so it spikes just
+    /// because you're looking at this list.
+    static let ignored: Set<String> = ["MenuBarAgent"]
+
     /// Uses /bin/ps because it runs setuid root and can see every process's CPU use,
     /// including system daemons that the app itself isn't allowed to read.
     /// `cpu` is percent of one core, the same as Activity Monitor and `cputemp`.
@@ -25,6 +29,7 @@ enum TopCPU {
             let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
             guard parts.count == 3, let cpu = Double(parts[0]), let pid = Int(parts[1]), pid != me else { continue }
             let name = HardReset.displayName(String(parts[2]))
+            if ignored.contains(name) { continue }
             totals[name, default: (0, 0)].cpu += cpu
             totals[name, default: (0, 0)].n += 1
         }
